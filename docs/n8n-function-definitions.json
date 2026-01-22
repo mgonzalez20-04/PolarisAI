@@ -1,0 +1,140 @@
+{
+  "functions": [
+    {
+      "name": "search_knowledge_base",
+      "description": "Searches the knowledge base using semantic vector search in Supabase. Use this to find relevant documentation, guides, FAQs, or information that can help answer the email or understand the context better. Returns the most similar documents based on semantic meaning, not just keyword matching.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query to find relevant knowledge base articles. Can be a question, topic, or description of what you're looking for. Examples: 'how to reset password', 'authentication error solutions', 'pricing information'"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of results to return (default: 5, max: 20)",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 20
+          },
+          "minSimilarity": {
+            "type": "number",
+            "description": "Minimum similarity threshold from 0 to 1, where 1 is identical (default: 0.7). Lower values return more results but may be less relevant.",
+            "default": 0.7,
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "search_resolved_cases",
+      "description": "Searches for similar resolved support cases using semantic vector search in Supabase. Use this to find how similar issues or questions were resolved in the past. Helps identify patterns and proven solutions. Only searches cases with status 'resolved' or 'closed'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query describing the issue, question, or case. Examples: 'login problems', 'billing inquiry', 'feature request for dark mode'"
+          },
+          "userId": {
+            "type": "string",
+            "description": "The user ID to search cases for. This should be the ID of the user whose mailbox is being processed. Use the account owner's user ID."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of results to return (default: 5, max: 10)",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 10
+          },
+          "minSimilarity": {
+            "type": "number",
+            "description": "Minimum similarity threshold from 0 to 1 (default: 0.7)",
+            "default": 0.7,
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": ["query", "userId"]
+      }
+    }
+  ],
+  "instructions": {
+    "when_to_use_search_knowledge_base": [
+      "The email asks a question that might be documented (how to, what is, where can I)",
+      "You need to verify product features, pricing, or policies",
+      "The email mentions technical terms or concepts that need clarification",
+      "You want to provide accurate information based on official documentation",
+      "The topic is something that likely has a guide or FAQ entry"
+    ],
+    "when_to_use_search_resolved_cases": [
+      "The email describes a problem or issue",
+      "You want to see if this exact issue was reported before",
+      "You need to find proven solutions or responses",
+      "The email is similar to common support requests",
+      "You want to maintain consistency in how similar cases are handled"
+    ],
+    "best_practices": [
+      "Use both functions when appropriate - knowledge base for documentation, cases for solutions",
+      "Keep queries concise but descriptive (3-10 words ideal)",
+      "Extract key terms from the email for better search results",
+      "Use minSimilarity=0.8 for very specific matches, 0.6 for broader searches",
+      "Include function results in your analysis and summary"
+    ]
+  },
+  "example_prompts": {
+    "basic": "Analyze this email and return JSON with category, tags, summary, sentiment, and priority. If helpful, use search_knowledge_base to find relevant documentation or search_resolved_cases to find similar past issues.\n\nEmail Subject: {{$json.subject}}\nEmail Body: {{$json.bodyPreview}}",
+    "advanced": "You are an intelligent email categorization assistant with access to a knowledge base and historical case data.\n\nYour task:\n1. Analyze the email below\n2. If the email asks a question or mentions topics, use search_knowledge_base to find relevant documentation\n3. If the email describes a problem, use search_resolved_cases to find how similar issues were handled\n4. Categorize the email based on your analysis AND the context you found\n5. Return JSON with: category, tags, summary, sentiment, priority\n6. In the summary, mention any relevant insights from knowledge base or past cases\n\nEmail Subject: {{$json.subject}}\nEmail From: {{$json.from}}\nEmail Body: {{$json.bodyPreview}}\n\nCategories: bug, feature, question, support, feedback, other\nSentiment: positive, neutral, negative\nPriority: low, medium, high, urgent"
+  },
+  "http_request_configs": {
+    "knowledge_base_search": {
+      "method": "POST",
+      "url": "{{$env.APP_URL}}/api/vector-search/knowledge",
+      "authentication": "headerAuth",
+      "headerAuth": {
+        "name": "x-api-key",
+        "value": "={{$env.N8N_WEBHOOK_API_KEY}}"
+      },
+      "bodyParametersJson": "={\n  \"query\": \"{{$json.arguments.query}}\",\n  \"limit\": {{$json.arguments.limit || 5}},\n  \"minSimilarity\": {{$json.arguments.minSimilarity || 0.7}}\n}",
+      "options": {
+        "timeout": 30000,
+        "response": {
+          "response": {
+            "fullResponse": false,
+            "neverError": false
+          }
+        }
+      }
+    },
+    "cases_search": {
+      "method": "POST",
+      "url": "{{$env.APP_URL}}/api/vector-search/cases",
+      "authentication": "headerAuth",
+      "headerAuth": {
+        "name": "x-api-key",
+        "value": "={{$env.N8N_WEBHOOK_API_KEY}}"
+      },
+      "bodyParametersJson": "={\n  \"query\": \"{{$json.arguments.query}}\",\n  \"userId\": \"{{$json.arguments.userId}}\",\n  \"limit\": {{$json.arguments.limit || 5}},\n  \"minSimilarity\": {{$json.arguments.minSimilarity || 0.7}}\n}",
+      "options": {
+        "timeout": 30000,
+        "response": {
+          "response": {
+            "fullResponse": false,
+            "neverError": false
+          }
+        }
+      }
+    }
+  },
+  "notes": [
+    "Make sure APP_URL environment variable is set in n8n (e.g., http://localhost:3000 for local, https://yourdomain.com for production)",
+    "N8N_WEBHOOK_API_KEY must match the one configured in your application's .env.local",
+    "Both endpoints require authentication - they will return 401 if API key is missing or invalid",
+    "The userId parameter for search_resolved_cases should be extracted from your workflow context (e.g., the mailbox owner's user ID)",
+    "Similarity scores range from 0 to 1, where values above 0.7 are generally considered relevant",
+    "Results are automatically sorted by similarity (highest first)",
+    "Embeddings are cached, so repeated searches for the same query are very fast"
+  ]
+}

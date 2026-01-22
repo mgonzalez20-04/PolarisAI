@@ -1,0 +1,201 @@
+{
+  "name": "Email Sync - Microsoft to App",
+  "nodes": [
+    {
+      "parameters": {
+        "resource": "message",
+        "event": "messageReceived",
+        "options": {}
+      },
+      "id": "outlook-trigger",
+      "name": "When Email Received",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "auto-generated"
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Eres un asistente experto en análisis de correos de soporte. Tu tarea es analizar correos y extraer información estructurada en formato JSON. Responde SOLO con JSON válido, sin texto adicional ni markdown code blocks."
+            },
+            {
+              "role": "user",
+              "content": "={{ \"Analiza este correo y extrae la siguiente información en formato JSON:\\n\\nAsunto: \" + $json.subject + \"\\nDe: \" + $json.from.emailAddress.name + \" <\" + $json.from.emailAddress.address + \">\\nCuerpo: \" + $json.bodyPreview + \"\\n\\nExtrae SOLO un objeto JSON con esta estructura exacta (sin markdown, sin code blocks):\\n{\\n  \\\"category\\\": \\\"bug\\\",\\n  \\\"tags\\\": [\\\"palabra1\\\", \\\"palabra2\\\"],\\n  \\\"summary\\\": \\\"resumen breve\\\",\\n  \\\"sentiment\\\": \\\"positive\\\",\\n  \\\"priority\\\": \\\"medium\\\"\\n}\\n\\nReglas:\\n- category: solo uno de: bug, feature, question, support, other\\n- tags: máximo 5 palabras clave relevantes\\n- summary: máximo 100 caracteres\\n- sentiment: solo uno de: positive, negative, neutral\\n- priority: solo uno de: low, medium, high, urgent\" }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 500
+        },
+        "simplifyOutput": true
+      },
+      "id": "openai-analysis",
+      "name": "OpenAI - Analyze Email",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response\nlet aiAnalysis;\ntry {\n  // OpenAI devuelve el JSON en message.content\n  const content = $input.item.json.message?.content || $input.item.json.text || JSON.stringify($input.item.json);\n\n  // Limpiar markdown code blocks si existen\n  const cleanContent = content\n    .replace(/```json\\n?/g, '')\n    .replace(/```\\n?/g, '')\n    .trim();\n\n  aiAnalysis = JSON.parse(cleanContent);\n} catch (error) {\n  // Fallback values si falla el parsing\n  console.error(\"Error parsing AI response:\", error);\n  console.error(\"Raw content:\", $input.item.json);\n  \n  aiAnalysis = {\n    category: \"other\",\n    tags: [\"sin-categorizar\"],\n    summary: ($input.first().json.subject || \"Sin resumen\").substring(0, 100),\n    sentiment: \"neutral\",\n    priority: \"medium\"\n  };\n}\n\n// Get email data from the trigger\nconst email = $('When Email Received').item.json;\n\n// Ensure toRecipients exists and has at least one recipient\nif (!email.toRecipients || email.toRecipients.length === 0) {\n  throw new Error('Email has no recipients');\n}\n\n// Transform to webhook format\nreturn {\n  json: {\n    messageId: email.id,\n    subject: email.subject,\n    from: email.from.emailAddress.name || email.from.emailAddress.address,\n    fromEmail: email.from.emailAddress.address,\n    to: email.toRecipients[0].emailAddress.address,\n    cc: email.toRecipients.slice(1).map(r => r.emailAddress.address).join(', ') || undefined,\n    receivedAt: email.receivedDateTime,\n    bodyPreview: email.bodyPreview,\n    bodyText: email.body.contentType === 'text' ? email.body.content : undefined,\n    bodyHtml: email.body.contentType === 'html' ? email.body.content : undefined,\n    aiCatalog: {\n      category: aiAnalysis.category,\n      tags: Array.isArray(aiAnalysis.tags) ? aiAnalysis.tags : [],\n      summary: aiAnalysis.summary,\n      sentiment: aiAnalysis.sentiment,\n      priority: aiAnalysis.priority\n    },\n    conversationId: email.conversationId,\n    hasAttachments: email.hasAttachments || false\n  }\n};"
+      },
+      "id": "transform-data",
+      "name": "Transform to Webhook Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:3000/api/n8n/webhook",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.WEBHOOK_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "send-webhook",
+      "name": "Send to App Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "1",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-success",
+      "name": "Check Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {},
+      "id": "success-branch",
+      "name": "Success",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log error details\nconst emailId = $('Transform to Webhook Format').item.json.messageId;\nconst error = $json.error || $json.details || 'Unknown error';\n\nconsole.error('❌ Failed to send email to webhook:', {\n  emailId: emailId,\n  subject: $('Transform to Webhook Format').item.json.subject,\n  error: error,\n  timestamp: new Date().toISOString()\n});\n\n// Return error info for logging\nreturn {\n  json: {\n    status: 'failed',\n    emailId: emailId,\n    error: error,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "error-logging",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400]
+    }
+  ],
+  "connections": {
+    "When Email Received": {
+      "main": [
+        [
+          {
+            "node": "OpenAI - Analyze Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Analyze Email": {
+      "main": [
+        [
+          {
+            "node": "Transform to Webhook Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform to Webhook Format": {
+      "main": [
+        [
+          {
+            "node": "Send to App Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to App Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Success": {
+      "main": [
+        [
+          {
+            "node": "Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
