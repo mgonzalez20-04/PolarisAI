@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ChevronRight, ChevronDown, Folder, FolderOpen, Inbox, Mail, Settings as SettingsIcon } from "lucide-react";
+import { ChevronRight, ChevronDown, Folder, FolderOpen, Inbox, Mail, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,7 @@ export function FolderNavigation({ onFolderSelect, selectedFolderId }: FolderNav
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(["inbox"]));
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const { theme } = useTheme();
 
   // Theme-based text colors
@@ -115,6 +116,30 @@ export function FolderNavigation({ onFolderSelect, selectedFolderId }: FolderNav
     }
   };
 
+  const syncFolders = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/folders", {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        console.log("Folders synced successfully:", data.message);
+        // Recargar carpetas
+        await loadFolders();
+      } else {
+        console.error("Error syncing folders:", data.error);
+        alert(`Error al sincronizar carpetas: ${data.error}`);
+      }
+    } catch (error) {
+      console.error("Error syncing folders:", error);
+      alert("Error al sincronizar carpetas. Por favor intenta de nuevo.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const toggleFolder = (folderId: string) => {
     const newExpanded = new Set(expandedFolders);
     if (newExpanded.has(folderId)) {
@@ -198,6 +223,22 @@ export function FolderNavigation({ onFolderSelect, selectedFolderId }: FolderNav
 
   return (
     <div className="space-y-1 p-2">
+      {/* Sync button */}
+      <Button
+        variant="outline"
+        className={cn(
+          `w-full justify-start ${textColors.text} ${textColors.bgHover} transition-all duration-200 mb-2`,
+          syncing && "opacity-50 cursor-not-allowed"
+        )}
+        onClick={syncFolders}
+        disabled={syncing}
+      >
+        <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
+        <span className="ml-2 text-sm">
+          {syncing ? "Sincronizando..." : "Sincronizar carpetas"}
+        </span>
+      </Button>
+
       {/* "All" folders button */}
       <Button
         variant="ghost"
